@@ -19,11 +19,23 @@ namespace VMSControl
 {
     public partial class Form1 : Form
     {
+        /*
+         * Define
+         */
+        public static int SPLUS_LENGTH = 21;
+        public static string g_configIniDirectory = @"C:\Hanlim\IniProfiles";
+        public static string g_configIniPath = @"C:\Hanlim\IniProfiles\setup.ini";
+        public static string g_logPath = @"C:\Hanlim\Log";
+        public static string g_soundPath = @"C:\Hanlim\Sound";
+
         bool _loraConnection = false;       // 시리얼 통신 열기 유무
         bool _vmsConnection = false;        // vms 통신 연결 유무
 
         List<byte> _listLoraRBuff = new List<byte>();
-        int _laraDataSize = 6;
+        List<byte> mLoraDataBuff = new List<byte>();
+
+        int _laraDataSize = 21; 
+
 
 
         TcpClient _tcpClient;
@@ -51,6 +63,18 @@ namespace VMSControl
 
 
         int _velocity = 0;
+        bool isfirstBoot = true;
+        int pastEventCode = 0xFF;
+
+        #region INI system dll
+        [DllImport("kernel32")]
+        private static extern long WritePrivateProfileString(string section, string key, string val, string filePath);
+        [DllImport("kernel32")]
+        private static extern int GetPrivateProfileString(string section, string key, string def, StringBuilder retVal, int size, string filePath);
+        #endregion
+
+        string[] portList;
+
 
         public Form1()
         {
@@ -59,24 +83,62 @@ namespace VMSControl
 
         private void Form1_Load(object sender, EventArgs e)
         {
+#if !DEBUG
+            Height = 580;
+#endif
+            DirectoryInfo di = new DirectoryInfo(g_configIniDirectory);
+            if (di.Exists == false)
+            {
+                di.Create();
+            }
             IPAddress.TryParse(tbServerIP.Text, out _ipAddress);    // VMP  서버 IP 설정
             int.TryParse(tbServerPort.Text, out _vmsPort);          // VMS 서버 Port 설정
 
-            string[] comlist = System.IO.Ports.SerialPort.GetPortNames();
+            portList = System.IO.Ports.SerialPort.GetPortNames();
 
-            if (comlist.Length > 0)
+
+            if (portList.Length > 0)
             {
-                comboBoxCom1.Items.AddRange(comlist);
+                comboBoxCom1.Items.AddRange(portList);
                 //제일 처음에 위치한 녀석을 선택
                 comboBoxCom1.SelectedIndex = 0;
             }
+            LoadIni();
 
             _tickValue = (int)numericUpDownTick.Value;   //초기값 가지고 오기
 
             timerTick.Start();
 
+            isfirstBoot = true;
             connectionSerial(); // 로라 연결
             connetionServer();  // 전광판 연결
+        }
+
+        private void LoadIni()
+        {
+            StringBuilder tmp = new StringBuilder(5000);
+            int result = GetPrivateProfileString("SETUP", "PORT", "", tmp, 5000, g_configIniPath);
+            if (result == 0)
+            {
+                if (File.Exists(g_configIniPath) == false)
+                {
+                    File.Create(g_configIniPath);
+                }
+            }
+            else
+            {
+                int index = 0;
+                foreach(string port in portList)
+                {
+                    if (tmp.Equals(port))
+                    {
+                        comboBoxCom1.SelectedIndex = index;
+                        break;
+                    }
+                    index++;
+                }
+
+            }
         }
 
         private void buttonOpenSerial_Click(object sender, EventArgs e)
@@ -102,6 +164,7 @@ namespace VMSControl
                 {
                     WirteTextBox("로라 연결 시도");
 
+                    WritePrivateProfileString("SETUP", "PORT", comboBoxCom1.Text, g_configIniPath);
                     serialPortLora.PortName = comboBoxCom1.Text;
                     serialPortLora.Open();
 
@@ -131,6 +194,7 @@ namespace VMSControl
 
             if (RecvSize > 0)
             {
+                WirteTextBox($"Serial Read{RecvSize}");
                 serialPortLora.Read(buff, 0, RecvSize);
 
                 LoraDataCotrol(buff);
@@ -141,27 +205,34 @@ namespace VMSControl
         {
             _listLoraRBuff.AddRange(buff);
 
-            int iCnt = 0;
-            while (_listLoraRBuff.Count >= _laraDataSize)  // 길이 다르면 처리 하는 부분 필요
-            {
-                ReadDataCut();
-                if (iCnt++ > _laraDataSize)      // 길이 다름 다를때 로그 남겨야 함
-                {
+            WirteTextBox(BitConverter.ToString(buff));
 
-                    byte[] strByte = _listLoraRBuff.ToArray();
-                    string str = string.Format("길이 오류!!! {0}: {1}", _listLoraRBuff.Count, System.Text.Encoding.UTF8.GetString(strByte));
-                    Console.WriteLine(str);
 
-                    WirteTextBox(str);
-                    _listLoraRBuff.Clear();
-                    break;
-                }
+            ReadDataCut();
 
-            }
+            //int iCnt = 0;
+            //while (_listLoraRBuff.Count >= _laraDataSize)  // 길이 다르면 처리 하는 부분 필요
+            //{
+            //    ReadDataCut();
+            //    if (iCnt++ > _laraDataSize)      // 길이 다름 다를때 로그 남겨야 함
+            //    {
+
+            //        byte[] strByte = _listLoraRBuff.ToArray();
+            //        string str = string.Format("길이 오류!!! {0}: {1}", _listLoraRBuff.Count, System.Text.Encoding.UTF8.GetString(strByte));
+            //        Console.WriteLine(str);
+
+            //        WirteTextBox(str);
+            //        _listLoraRBuff.Clear();
+            //        break;
+            //    }
+
+            //}
         }
+
 
         private void ReadDataCut()
         {
+#if false
             int index = 0;
             foreach (byte data in _listLoraRBuff)
             {
@@ -245,6 +316,61 @@ namespace VMSControl
                 }
                 index++;
             }
+
+#else
+            int index = 0;
+            bool isStart = false;
+            bool isEnd = false;
+            foreach (byte data in _listLoraRBuff)
+            {
+                if (data == 0x3C)
+                {
+                    isStart = true;
+                    mLoraDataBuff.Clear();
+                    mLoraDataBuff.Add(data);
+                    index++;
+                }
+                else if (data == 0x3E && isStart)
+                {
+                    isStart = false;
+                    isEnd = true;
+                    mLoraDataBuff.Add(data);
+                    index++;
+                    _listLoraRBuff.RemoveRange(0, index);
+                    if (mLoraDataBuff.Count == SPLUS_LENGTH)
+                    {
+                        int alert = mLoraDataBuff[6];
+
+                        byte[] parsingBuf = mLoraDataBuff.ToArray();
+                        WirteTextBox($"SPLUS Data Receive{alert}");
+                        WirteTextBox(BitConverter.ToString(parsingBuf));
+                        SendVms(alert);
+                    }
+                    break;
+                }
+                else if (isStart)
+                {
+                    mLoraDataBuff.Add(data);
+                    index++;
+                }
+                  
+            }
+
+            if (isStart)
+            {
+                if (!isEnd)
+                {
+                    isStart = false;
+                    mLoraDataBuff.Clear();
+                }
+            }
+            else
+            {
+                _listLoraRBuff.Clear();
+            }
+
+#endif
+
         }
 
         private void WriteTextBox(byte[] buff, bool isRead, bool isTcp)
@@ -253,7 +379,7 @@ namespace VMSControl
 
             DateTime dt = DateTime.Now;
 
-            readData = string.Format("{0:D2}:{1:D2}:{2:D2}:{3:D2}, ", dt.Hour, dt.Minute, dt.Second, dt.Millisecond);
+            readData = string.Format("[{0:D2}:{1:D2}:{2:D2}:{3:D2}] - ", dt.Hour, dt.Minute, dt.Second, dt.Millisecond);
 
             if (isRead)
             {
@@ -289,7 +415,7 @@ namespace VMSControl
         {
             DateTime dt = DateTime.Now;
 
-            readData = string.Format("{0:D2}:{1:D2}:{2:D2}:{3:D2}, {4}", dt.Hour, dt.Minute, dt.Second, dt.Millisecond, readData);
+            readData = string.Format("[{0:D2}:{1:D2}:{2:D2}:{3:D2}] - {4}", dt.Hour, dt.Minute, dt.Second, dt.Millisecond, readData);
             readData += Environment.NewLine;
             string str = readData + textBoxLoraData.Text;   // 받은 데이터 표시
             textBoxLoraData.Invoke(new Action<string>(doInvoke), str);
@@ -303,20 +429,18 @@ namespace VMSControl
             if (strLog == null)
                 return;
 
-            string path = @"c:/cachcar/data/";
-
             DateTime dt = DateTime.Now;
 
             if (oldDay != dt.Day)    // 이전 날과 다르면 폴드 생성
             {
-                DirectoryInfo di = new DirectoryInfo(path);
+                DirectoryInfo di = new DirectoryInfo(g_logPath);
 
                 if (!di.Exists)
                 {
                     di.Create();        // 경로 생성
                 }
 
-                string fileName = string.Format("{0}/{1:D4}{2:D2}{3:D2}.txt", path, dt.Year, dt.Month, dt.Day);
+                string fileName = string.Format("{0}/{1:D4}{2:D2}{3:D2}.txt", g_logPath, dt.Year, dt.Month, dt.Day);
                 FileInfo fi = new FileInfo(fileName);
 
                 File.AppendAllText(fileName, strLog, Encoding.Default);
@@ -372,7 +496,7 @@ namespace VMSControl
             }
             catch (Exception ex)
             {
-                WirteTextBox(ex.Message);
+                WirteTextBox("connetion " + ex.Message);
             }
         }
 
@@ -392,12 +516,18 @@ namespace VMSControl
 
                 WirteTextBox("VMS 연결 성공!!");
 
+                if (isfirstBoot)
+                {
+                    SendVms(0);
+                    isfirstBoot = false;
+                }
+
             }
             catch (Exception ex)
             {
                 //MessageBox.Show(exc.Message);
                 _vmsConnection = false; //연결 실패
-                WirteTextBox(ex.Message);
+                WirteTextBox("complete connect " + ex.Message);
             }
         }
 
@@ -409,38 +539,41 @@ namespace VMSControl
 
             try
             {
-                tcpc = (TcpClient)iar.AsyncState;
-                nCountBytesReceivedFromServer = tcpc.GetStream().EndRead(iar);
-
-                if (nCountBytesReceivedFromServer == 0)
+                if (_tcpClient != null && _tcpClient.Connected)
                 {
-                    _vmsConnection = false; //연결 실패
-                    WirteTextBox("VMS Connection broken.");
-                    //MessageBox.Show("Connection broken.");
-                    return;
+                    tcpc = (TcpClient)iar.AsyncState;
+                    nCountBytesReceivedFromServer = tcpc.GetStream().EndRead(iar);
+
+                    if (nCountBytesReceivedFromServer == 0)
+                    {
+                        _vmsConnection = false; //연결 실패
+                        WirteTextBox("VMS Connection broken.");
+                        //MessageBox.Show("Connection broken.");
+                        return;
+                    }
+                    strReceived = Encoding.Default.GetString(_vmsRBuff, 0, nCountBytesReceivedFromServer);
+                    string s1 = Encoding.Default.GetString(_vmsRBuff, 0, nCountBytesReceivedFromServer - 1);
+
+                    //if(mRx[nCountBytesReceivedFromServer-1] != '\n') return;
+                    WriteTextBox(Encoding.UTF8.GetBytes(s1), true, true);
+
+                    _vmsRBuff = new byte[512];
+                    tcpc.GetStream().BeginRead(_vmsRBuff, 0, _vmsRBuff.Length, onCompleteReadFromServerStream, tcpc);
+
+                    _vmsConnection = true; //연결 성공
                 }
-                strReceived = Encoding.Default.GetString(_vmsRBuff, 0, nCountBytesReceivedFromServer);
-                string s1 = Encoding.Default.GetString(_vmsRBuff, 0, nCountBytesReceivedFromServer - 1);
-
-                //if(mRx[nCountBytesReceivedFromServer-1] != '\n') return;
-                WriteTextBox(Encoding.UTF8.GetBytes(s1), true, true);
-
-                _vmsRBuff = new byte[512];
-                tcpc.GetStream().BeginRead(_vmsRBuff, 0, _vmsRBuff.Length, onCompleteReadFromServerStream, tcpc);
-
-                _vmsConnection = true; //연결 성공
-
             }
             catch (Exception ex)
             {
                 //_vmsConnection = false; //연결 실패
-                WirteTextBox(ex.Message);
+                WirteTextBox("complete server " + ex.Message);
                 //MessageBox.Show(exc.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
         void SendVms(int velocity)
         {
+#if false
             string sendString = string.Format("![000/E0606 /S1000 /C1전방 작업중 주의 운행!! !]");
 
             if (_isDanger == false)
@@ -486,50 +619,129 @@ namespace VMSControl
                 sendString = string.Format("![000/E0606 /S1000 /C1전방 작업중 주의 운행!! !]");
             }
 
+#else
 
+            bool isRefresh = false;
+
+            string sendString = "![000/E0606 /S1000 /C2밀폐지역 가스 측정치 /C4정상 /C2입니다 !]";
+
+            if (pastEventCode != velocity)
+            {
+                pastEventCode = velocity;
+
+                isRefresh = true;
+                
+                switch (velocity)
+                {
+                    case 0x51:
+                        /*
+                         * O2 주의
+                         */
+                        sendString = "![000/E0606 /S1000 /C1산소 /C2측정치 이상 감지 주의하세요 !]";
+                        break;
+                    case 0x61:
+                        /*
+                         * O2 경고
+                         */
+                        sendString = "![000/E0606 /S1000 /C1산소  /C2측청치 이상 발생 대피하세요 !]";
+                        break;
+                    case 0x52:
+                        /*
+                         * CO 주의
+                         */
+                        sendString = "![000/E0606 /S1000 /C1일산화탄소 /C2감지 주의하세요 !]";
+                        break;
+                    case 0x62:
+                        /*
+                         * CO 경고
+                         */
+                        sendString = "![000/E0606 /S1000 /C1일산화탄소 /C2높음 대피하세요 !]";
+                        break;
+                    case 0x53:
+                        /*
+                         * H2S 주의
+                         */
+                        sendString = "![000/E0606 /S1000 /C1황화수소 /C2감지 주의하세요 !]";
+                        break;
+                    case 0x63:
+                        /*
+                         * H2S 경고
+                         */
+                        sendString = "![000/E0606 /S1000 /C1황화수소 /C2높음 대피하세요 !]";
+                        break;
+                    case 0x54:
+                        /*
+                         * 가연성가스 주의
+                         */
+                        sendString = "![000/E0606 /S1000 /C1폭발 위험 /C2감지 주의하세요 !]";
+                        break;
+                    case 0x64:
+                        /*
+                         * 가연성가스 경고
+                         */
+                        sendString = "![000/E0606 /S1000 /C1폭발 위험 /C2높음 대피하세요 !]";
+                        break;
+                    /*
+                     *  해제 코드
+                     */
+                    case 0x6A:
+                    case 0x6B:
+                    case 0x6C:
+                    case 0x6D:
+                        sendString = "![000/E0606 /S1000 /C2밀폐지역 가스 측정치 /C4정상 /C2입니다 !]";
+                        break;
+                }
+            }
+            
+#endif
             // 20240103 부산 항만 소리 사용하지 않음
             //VmsSoundPlay(_type);
 
-            byte[] sendData;
-
-            //sendData = Encoding.ASCII.GetBytes(sendString);
-            sendData = Encoding.Default.GetBytes(sendString);
-
-            try
+            if (isRefresh)
             {
-                connetionServer();
-                Thread.Sleep(200);  // 서버 연결 후 조금 기다렸다가 데이터 보내야 함
+                isRefresh = false;
+                byte[] sendData;
 
-                if (_vmsConnection)
+                //sendData = Encoding.ASCII.GetBytes(sendString);
+                sendData = Encoding.Default.GetBytes(sendString);
+
+                try
                 {
+                    connetionServer();
+                    Thread.Sleep(200);  // 서버 연결 후 조금 기다렸다가 데이터 보내야 함
 
-                    if (_tcpClient != null)
+                    if (_vmsConnection)
                     {
-                        if (_tcpClient.Client.Connected)
+
+                        if (_tcpClient != null)
                         {
+                            if (_tcpClient.Client.Connected)
+                            {
 
-                            WriteTextBox(sendData, false, true);
-                            _tcpClient.GetStream().BeginWrite(sendData, 0, sendData.Length, onCompleteWriteToServer, _tcpClient);
+                                WriteTextBox(sendData, false, true);
+                                _tcpClient.GetStream().BeginWrite(sendData, 0, sendData.Length, onCompleteWriteToServer, _tcpClient);
 
-                            //WriteTextBox(sendData, false, true);
+                                //WriteTextBox(sendData, false, true);
+                            }
                         }
                     }
-                }
 
-                WirteTextBox("VMS 연결 끊기!!");
-                if (_tcpClient != null)
+                    WirteTextBox("VMS 연결 끊기!!");
+                    if (_tcpClient != null)
+                    {
+                        if (_tcpClient.Client.IsBound)
+                            _tcpClient.Close();
+
+                        _tcpClient = null;
+                    }
+
+                }
+                catch (Exception ex)
                 {
-                    if (_tcpClient.Client.IsBound)
-                        _tcpClient.Close();
-
-                    _tcpClient = null;
+                    WirteTextBox(ex.Message);
                 }
-
             }
-            catch(Exception ex)
-            {
-                WirteTextBox(ex.Message);
-            }
+            
 
             //try
             //{
@@ -669,8 +881,9 @@ namespace VMSControl
             buff[4] = 0x00;
             buff[5] = 0x3E;
 
-            LoraDataCotrol(buff);
-            
+            //LoraDataCotrol(buff);
+            SendVms(0x51);
+
         }
 
         private void buttonSoundPlay_Click(object sender, EventArgs e)
@@ -691,7 +904,8 @@ namespace VMSControl
             buff[3] = 0x00;
             buff[4] = 0x00;
             buff[5] = 0x3E;
-            LoraDataCotrol(buff);
+            //LoraDataCotrol(buff);
+            SendVms(0x51);
         }
 
         private void checkBoxSound_CheckedChanged(object sender, EventArgs e)
@@ -796,10 +1010,18 @@ namespace VMSControl
         private void Form1_FormClosing(object sender, FormClosingEventArgs e)
         {
             if (_vmsConnection)
-                _tcpClient.Close();
+            {
+                if (_tcpClient != null)
+                    _tcpClient.Close();
+
+            }
 
             if (_loraConnection)
-                serialPortLora.Close();
+            {
+                if (serialPortLora != null)
+                    serialPortLora.Close();
+
+            }
             
 
         }
