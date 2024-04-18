@@ -23,6 +23,7 @@ namespace VMSControl
          * Define
          */
         public static int SPLUS_LENGTH = 21;
+        public static int NOTIFICATION_LENGTH = 6;
         public static string g_configIniDirectory = @"C:\Hanlim\IniProfiles";
         public static string g_configIniPath = @"C:\Hanlim\IniProfiles\setup.ini";
         public static string g_logPath = @"C:\Hanlim\Log";
@@ -44,7 +45,7 @@ namespace VMSControl
         IPAddress _ipAddress;// = "192.168.0.201";
 
         byte[] _vmsRBuff = new byte[512];
-
+        
         bool _isDanger = false; // 위험 사항 표시
 
         private SoundPlayer _player = new SoundPlayer();
@@ -346,6 +347,15 @@ namespace VMSControl
                         WirteTextBox(BitConverter.ToString(parsingBuf));
                         SendVms(alert);
                     }
+                    else if (mLoraDataBuff.Count == NOTIFICATION_LENGTH)
+                    {
+                        int alert = mLoraDataBuff[3];
+
+                        byte[] parsingBuf = mLoraDataBuff.ToArray();
+                        WirteTextBox($"NOTI Data Receive{alert}");
+                        WirteTextBox(BitConverter.ToString(parsingBuf));
+                        SendVms(alert);
+                    }
                     break;
                 }
                 else if (isStart)
@@ -623,7 +633,8 @@ namespace VMSControl
 
             bool isRefresh = false;
 
-            string sendString = "![000/E0606 /S1000 /C2밀폐지역 가스 측정치 /C4정상 /C2입니다 !]";
+            //string sendString = "![000/E0606 /S1000 /C2밀폐지역 가스 측정치 /C4정상 /C2입니다 !]";
+            string sendString = "![000/E0606/S1000/C1안전사항/C2을 준수하여 작업하시기 바랍니다!!!]";
 
             if (pastEventCode != velocity)
             {
@@ -633,53 +644,76 @@ namespace VMSControl
                 
                 switch (velocity)
                 {
+                    case 0x73:
+                        /*
+                         * 폭염 주의
+                         */
+                        sendString = "![000/E5555/S7000/C1폭염 /C3주의보 /C2단계!]";
+                        break;
+                    case 0x74:
+                        /*
+                         * 폭염 주의
+                         */
+                        sendString = "![000/E5555/S7000/C1 폭염 경고 /C2단계!]";
+                        break;
+                    case 0x00:
+                        sendString = "![000/E0606/S1000/C1안전사항/C2을 준수하여 작업하시기 바랍니다!!!]";
+                        break;
                     case 0x51:
                         /*
                          * O2 주의
                          */
-                        sendString = "![000/E0606 /S1000 /C1산소 /C2측정치 이상 감지 주의하세요 !]";
+                        //sendString = "![000/E0606 /S1000 /C1산소 /C2측정치 이상 감지 주의하세요 !]";
+                        sendString = "![000/E5555/S7000/C1산소 /C2측정치 /C3주의 !]";
                         break;
                     case 0x61:
                         /*
                          * O2 경고
                          */
-                        sendString = "![000/E0606 /S1000 /C1산소  /C2측청치 이상 발생 대피하세요 !]";
+                        //sendString = "![000/E0606 /S1000 /C1산소  /C2측청치 이상 발생 대피하세요 !]";
+                        sendString = "![000/E5555/S7000/C1산소 /C2측청치 /C1경고 !]";
                         break;
                     case 0x52:
                         /*
                          * CO 주의
                          */
-                        sendString = "![000/E0606 /S1000 /C1일산화탄소 /C2감지 주의하세요 !]";
+                        //sendString = "![000/E0606 /S1000 /C1일산화탄소 /C2감지 주의하세요 !]";
+                        sendString = "![000/E5555/S7000/C1일산화탄소 /C3주의 !]";
                         break;
                     case 0x62:
                         /*
                          * CO 경고
                          */
-                        sendString = "![000/E0606 /S1000 /C1일산화탄소 /C2높음 대피하세요 !]";
+                        //sendString = "![000/E0606 /S1000 /C1일산화탄소 /C2높음 대피하세요 !]";
+                        sendString = "![000/E5555/S7000/C1일산화탄소 경고 !]";
                         break;
                     case 0x53:
                         /*
                          * H2S 주의
                          */
-                        sendString = "![000/E0606 /S1000 /C1황화수소 /C2감지 주의하세요 !]";
+                        //sendString = "![000/E0606 /S1000 /C1황화수소 /C2감지 주의하세요 !]";
+                        sendString = "![000/E5555/S7000/C1황화수소 /C3주의 !]";
                         break;
                     case 0x63:
                         /*
                          * H2S 경고
                          */
-                        sendString = "![000/E0606 /S1000 /C1황화수소 /C2높음 대피하세요 !]";
+                        //sendString = "![000/E0606 /S1000 /C1황화수소 /C2높음 대피하세요 !]"; 
+                        sendString = "![000/E5555/S7000/C1황화수소 경고 !]";
                         break;
                     case 0x54:
                         /*
                          * 가연성가스 주의
                          */
-                        sendString = "![000/E0606 /S1000 /C1폭발 위험 /C2감지 주의하세요 !]";
+                        //sendString = "![000/E0606 /S1000 /C1폭발 위험 /C2감지 주의하세요 !]";
+                        sendString = "![000/E5555/S7000/C1가연성 가스 /C3주의 !]";
                         break;
                     case 0x64:
                         /*
                          * 가연성가스 경고
                          */
-                        sendString = "![000/E0606 /S1000 /C1폭발 위험 /C2높음 대피하세요 !]";
+                        //sendString = "![000/E0606 /S1000 /C1폭발 위험 /C2높음 대피하세요 !]";
+                        sendString = "![000/E5555/S7000/C1가연성 가스 경고 !]";
                         break;
                     /*
                      *  해제 코드
@@ -688,7 +722,8 @@ namespace VMSControl
                     case 0x6B:
                     case 0x6C:
                     case 0x6D:
-                        sendString = "![000/E0606 /S1000 /C2밀폐지역 가스 측정치 /C4정상 /C2입니다 !]";
+                        //sendString = "![000/E0606 /S1000 /C2밀폐지역 가스 측정치 /C4정상 /C2입니다 !]";                   
+                        sendString = "![000/E0606/S1000/C1안전사항/C2을 준수하여 작업하시기 바랍니다!!!]";
                         break;
                 }
             }
@@ -704,7 +739,7 @@ namespace VMSControl
 
                 //sendData = Encoding.ASCII.GetBytes(sendString);
                 sendData = Encoding.Default.GetBytes(sendString);
-
+                
                 try
                 {
                     connetionServer();
@@ -882,7 +917,7 @@ namespace VMSControl
             buff[5] = 0x3E;
 
             //LoraDataCotrol(buff);
-            SendVms(0x51);
+            SendVms(0x53);
 
         }
 
@@ -905,7 +940,7 @@ namespace VMSControl
             buff[4] = 0x00;
             buff[5] = 0x3E;
             //LoraDataCotrol(buff);
-            SendVms(0x51);
+            SendVms(0x54);
         }
 
         private void checkBoxSound_CheckedChanged(object sender, EventArgs e)
